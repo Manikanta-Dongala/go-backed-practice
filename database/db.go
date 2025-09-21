@@ -1,0 +1,92 @@
+package database
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+type Database struct {
+	Client *mongo.Client
+	DB     *mongo.Database
+}
+
+// new database
+
+func NewDatabase(uri, dbName string) (*Database, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	if err != nil {
+		return nil, err
+	}
+
+	_ = client.Ping(ctx, nil)
+	log.Print("connected to database succesfully!..")
+
+	return &Database{
+		Client: client,
+		DB:     client.Database(dbName),
+	}, nil
+
+}
+
+// cancel function for database
+func (d *Database) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return d.Client.Disconnect(ctx)
+}
+
+// generic repository
+type Repository[T any] struct {
+	Collection *mongo.Collection
+}
+
+// new repository creation
+func NewRepository[T any](db *Database, collectionName string) *Repository[T] {
+	return &Repository[T]{
+		Collection: db.DB.Collection(collectionName),
+	}
+}
+
+// creating new document
+func (r *Repository[T]) Create(ctx context.Context, document T) error {
+	_, err := r.Collection.InsertOne(ctx, document)
+	return err
+}
+
+func (r *Repository[T]) FindByID(ctx context.Context, id string) (*T, error) {
+	var result T
+	err := r.Collection.FindOne(ctx, bson.M{"_id": id}).Decode(&result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (r *Repository[T]) Find(ctx context.Context, filter interface{}) ([]*T, error) {
+	cursor, err := r.Collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var results []*T
+
+	for cursor.Next(ctx) {
+		var document T
+		err := cursor.Decode(*&document)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, &document)
+	}
+	return results, nil
+}
