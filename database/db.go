@@ -14,12 +14,15 @@ type Database struct {
 	Client *mongo.Client
 	DB     *mongo.Database
 }
+// generic repository
+type Repository[T any] struct {
+	Collection *mongo.Collection
+}
 
-// new database
-
+// new database creation
 func NewDatabase(uri, dbName string) (*Database, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
@@ -37,16 +40,11 @@ func NewDatabase(uri, dbName string) (*Database, error) {
 
 }
 
-// cancel function for database
+// close function for database
 func (d *Database) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return d.Client.Disconnect(ctx)
-}
-
-// generic repository
-type Repository[T any] struct {
-	Collection *mongo.Collection
 }
 
 // new repository creation
@@ -62,6 +60,7 @@ func (r *Repository[T]) Create(ctx context.Context, document T) error {
 	return err
 }
 
+// find documents based on id
 func (r *Repository[T]) FindByID(ctx context.Context, id string) (*T, error) {
 	var result T
 	err := r.Collection.FindOne(ctx, bson.M{"_id": id}).Decode(&result)
@@ -71,6 +70,7 @@ func (r *Repository[T]) FindByID(ctx context.Context, id string) (*T, error) {
 	return &result, nil
 }
 
+// find documents based on filter or all
 func (r *Repository[T]) Find(ctx context.Context, filter interface{}) ([]*T, error) {
 	cursor, err := r.Collection.Find(ctx, filter)
 	if err != nil {
@@ -89,4 +89,34 @@ func (r *Repository[T]) Find(ctx context.Context, filter interface{}) ([]*T, err
 		results = append(results, &document)
 	}
 	return results, nil
+}
+
+func (r *Repository[T]) Update(ctx context.Context, id string, update interface{}) error {
+    _, err := r.Collection.UpdateOne(ctx, map[string]string{"_id": id}, update)
+    return err
+}
+
+func (r *Repository[T]) Delete(ctx context.Context, id string) error {
+    _, err := r.Collection.DeleteOne(ctx, map[string]string{"_id": id})
+    return err
+}
+
+func (r *Repository[T]) Aggregate(ctx context.Context, pipeline []interface{}) ([]*T, error) {
+    cursor, err := r.Collection.Aggregate(ctx, pipeline)
+    if err != nil {
+        return nil, err
+    }
+    defer cursor.Close(ctx)
+
+    var results []*T
+    for cursor.Next(ctx) {
+        var elem T
+        err := cursor.Decode(&elem)
+        if err != nil {
+            return nil, err
+        }
+        results = append(results, &elem)
+    }
+
+    return results, nil
 }
